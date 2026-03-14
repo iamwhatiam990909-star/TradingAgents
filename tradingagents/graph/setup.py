@@ -10,6 +10,41 @@ from tradingagents.agents.utils.agent_states import AgentState
 
 from .conditional_logic import ConditionalLogic
 
+_LANG_NAMES: Dict[str, str] = {
+    "zh-TW": "Traditional Chinese (繁體中文)",
+    "zh-CN": "Simplified Chinese (简体中文)",
+    "ja": "Japanese (日本語)",
+    "ko": "Korean (한국어)",
+}
+
+
+def _inject_language(llm: Any, language: str) -> None:
+    """Monkey-patch llm.invoke to prepend a language instruction.
+
+    Works for both direct invoke (non-tool agents) and via
+    RunnableBinding (tool-using agents created by create_react_agent),
+    because RunnableBinding.invoke delegates to self.bound.invoke.
+    """
+    lang_name = _LANG_NAMES.get(language, language)
+    instruction = (
+        f"CRITICAL INSTRUCTION: You MUST write your ENTIRE response in {lang_name}. "
+        f"All analysis, reasoning, conclusions, and recommendations must be in {lang_name}. "
+        f"Do not use English for your analysis content. "
+        f"Keep financial terms, ticker symbols, and numerical data as-is."
+    )
+    original_invoke = llm.invoke
+
+    def locale_invoke(input: Any, *args: Any, **kwargs: Any) -> Any:
+        from langchain_core.messages import SystemMessage
+
+        if isinstance(input, str):
+            input = f"{instruction}\n\n{input}"
+        elif isinstance(input, list):
+            input = [SystemMessage(content=instruction)] + list(input)
+        return original_invoke(input, *args, **kwargs)
+
+    object.__setattr__(llm, "invoke", locale_invoke)
+
 
 class GraphSetup:
     """Handles the setup and configuration of the agent graph."""
@@ -38,7 +73,8 @@ class GraphSetup:
         self.conditional_logic = conditional_logic
 
     def setup_graph(
-        self, selected_analysts=["market", "social", "news", "fundamentals"]
+        self, selected_analysts=["market", "social", "news", "fundamentals"],
+        language: str = "en",
     ):
         """Set up and compile the agent workflow graph.
 
@@ -51,6 +87,11 @@ class GraphSetup:
         """
         if len(selected_analysts) == 0:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
+
+        # Inject language instruction into LLMs for non-English reports
+        if language and language != "en":
+            _inject_language(self.quick_thinking_llm, language)
+            _inject_language(self.deep_thinking_llm, language)
 
         # Create analyst nodes
         analyst_nodes = {}
@@ -105,6 +146,11 @@ class GraphSetup:
             self.deep_thinking_llm, self.risk_manager_memory
         )
 
+        # Create options strategist node
+        options_strategist_node = create_options_strategist(
+            self.deep_thinking_llm
+        )
+
         # Create workflow
         workflow = StateGraph(AgentState)
 
@@ -125,6 +171,7 @@ class GraphSetup:
         workflow.add_node("Neutral Analyst", neutral_analyst)
         workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Risk Judge", risk_manager_node)
+        workflow.add_node("Options Strategist", options_strategist_node)
 
         # Define edges
         # Start with the first analyst
@@ -196,7 +243,8 @@ class GraphSetup:
             },
         )
 
-        workflow.add_edge("Risk Judge", END)
+        workflow.add_edge("Risk Judge", "Options Strategist")
+        workflow.add_edge("Options Strategist", END)
 
         # Compile and return
         return workflow.compile()

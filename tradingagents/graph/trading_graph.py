@@ -127,8 +127,9 @@ class TradingAgentsGraph:
         self.ticker = None
         self.log_states_dict = {}  # date to full state dict
 
-        # Set up the graph
-        self.graph = self.graph_setup.setup_graph(selected_analysts)
+        # Set up the graph (pass language for locale-aware LLM output)
+        language = self.config.get("language", "en")
+        self.graph = self.graph_setup.setup_graph(selected_analysts, language=language)
 
     def _get_provider_kwargs(self) -> Dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
@@ -248,6 +249,7 @@ class TradingAgentsGraph:
             },
             "investment_plan": final_state["investment_plan"],
             "final_trade_decision": final_state["final_trade_decision"],
+            "options_strategist_output": final_state.get("options_strategist_output", ""),
         }
 
         # Save to file
