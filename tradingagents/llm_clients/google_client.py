@@ -1,3 +1,5 @@
+import logging
+import time
 from typing import Any, Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -5,13 +7,29 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from .base_client import BaseLLMClient
 from .validators import validate_model
 
+logger = logging.getLogger(__name__)
+
 
 class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     """ChatGoogleGenerativeAI with normalized content output.
 
     Gemini 3 models return content as list: [{'type': 'text', 'text': '...'}]
     This normalizes to string for consistent downstream handling.
+    Also retries on rate-limit (429) errors with a 60-second wait.
     """
+
+    _RATE_LIMIT_RETRY_MAX: int = 3
+    _RATE_LIMIT_WAIT_SECONDS: int = 60
+
+    @staticmethod
+    def _is_rate_limit_error(e: Exception) -> bool:
+        err_type = type(e).__name__.lower()
+        err_msg = str(e).lower()
+        keywords = (
+            "429", "resource_exhausted", "resourceexhausted",
+            "quota", "rate_limit", "rate limit", "too many requests",
+        )
+        return any(k in err_type or k in err_msg for k in keywords)
 
     def _normalize_content(self, response):
         content = response.content
@@ -25,7 +43,17 @@ class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
         return response
 
     def invoke(self, input, config=None, **kwargs):
-        return self._normalize_content(super().invoke(input, config, **kwargs))
+        for attempt in range(self._RATE_LIMIT_RETRY_MAX + 1):
+            try:
+                return self._normalize_content(super().invoke(input, config, **kwargs))
+            except Exception as e:
+                if not self._is_rate_limit_error(e) or attempt == self._RATE_LIMIT_RETRY_MAX:
+                    raise
+                logger.warning(
+                    "Gemini rate limit hit (attempt %d/%d). Waiting %ds before retry...",
+                    attempt + 1, self._RATE_LIMIT_RETRY_MAX, self._RATE_LIMIT_WAIT_SECONDS,
+                )
+                time.sleep(self._RATE_LIMIT_WAIT_SECONDS)
 
 
 class GoogleClient(BaseLLMClient):
