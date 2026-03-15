@@ -1,4 +1,4 @@
-def create_options_strategist(llm):
+def create_options_strategist(llm, language: str = "en"):
     def options_strategist_node(state) -> dict:
         recommendation = state.get("final_trade_decision", "")
         investment_plan = state.get("investment_plan", "")
@@ -95,7 +95,23 @@ Strategy: [buy_call / buy_put / call_spread / put_spread / (empty if no_trade)]
 Strike: [X%-Y% OTM / —]
 Expiry: [X-Y weeks / —]
 Catalyst: [one sentence]
-Max Risk: 全部權利金"""
+Max Risk: 全部權利金
+
+CRITICAL FORMAT RULES:
+- You MUST keep ALL field labels (Direction, Strategy, Strike, Expiry, Catalyst, Max Risk) in English exactly as shown above.
+- The header "---OPTIONS STRATEGY---" must appear exactly as shown.
+- Do NOT translate field labels into any other language."""
+
+        # If non-English, instruct catalyst content in target language
+        if language and language != "en":
+            _LANG_NAMES = {
+                "zh-TW": "Traditional Chinese (繁體中文)",
+                "zh-CN": "Simplified Chinese (简体中文)",
+                "ja": "Japanese (日本語)",
+                "ko": "Korean (한국어)",
+            }
+            lang_name = _LANG_NAMES.get(language, language)
+            prompt += f"\n- Write the Catalyst sentence in {lang_name}."
 
         result = llm.invoke(prompt)
 

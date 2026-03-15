@@ -34,13 +34,18 @@ def _inject_language(llm: Any, language: str) -> None:
     )
     original_invoke = llm.invoke
 
+    reminder = (
+        f"\n\nREMINDER: You MUST write your ENTIRE response in {lang_name}. "
+        f"請用{lang_name}撰寫完整回應。"
+    )
+
     def locale_invoke(input: Any, *args: Any, **kwargs: Any) -> Any:
         from langchain_core.messages import SystemMessage
 
         if isinstance(input, str):
-            input = f"{instruction}\n\n{input}"
+            input = f"{instruction}\n\n{input}{reminder}"
         elif isinstance(input, list):
-            input = [SystemMessage(content=instruction)] + list(input)
+            input = [SystemMessage(content=instruction)] + list(input) + [SystemMessage(content=reminder)]
         return original_invoke(input, *args, **kwargs)
 
     object.__setattr__(llm, "invoke", locale_invoke)
@@ -148,7 +153,7 @@ class GraphSetup:
 
         # Create options strategist node
         options_strategist_node = create_options_strategist(
-            self.deep_thinking_llm
+            self.deep_thinking_llm, language=language
         )
 
         # Create workflow
