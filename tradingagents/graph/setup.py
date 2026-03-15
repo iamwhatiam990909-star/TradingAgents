@@ -27,16 +27,21 @@ def _inject_language(llm: Any, language: str) -> None:
     """
     lang_name = _LANG_NAMES.get(language, language)
     instruction = (
-        f"CRITICAL INSTRUCTION: You MUST write your ENTIRE response in {lang_name}. "
-        f"All analysis, reasoning, conclusions, and recommendations must be in {lang_name}. "
-        f"Do not use English for your analysis content. "
+        f"CRITICAL INSTRUCTION: You MUST write all analysis, reasoning, conclusions, "
+        f"and recommendations in {lang_name}. "
+        f"HOWEVER, you MUST keep ALL structured field labels, section headers, and "
+        f"format markers in English exactly as specified in the prompt. "
+        f"Examples of labels to keep in English: Entry, Stop-Loss, Take-Profit, "
+        f"Direction, Strategy, Strike, Expiry, Catalyst, Max Risk, Position Sizing, "
+        f"Timeframe, Risk/Reward, Scaling Strategy. "
         f"Keep financial terms, ticker symbols, and numerical data as-is."
     )
     original_invoke = llm.invoke
 
     reminder = (
-        f"\n\nREMINDER: You MUST write your ENTIRE response in {lang_name}. "
-        f"請用{lang_name}撰寫完整回應。"
+        f"\n\nREMINDER: Write all analysis content in {lang_name}. "
+        f"Keep ALL structured field labels in English exactly as shown in the prompt. "
+        f"請用{lang_name}撰寫分析內容，但保留所有結構化欄位標籤為英文。"
     )
 
     def locale_invoke(input: Any, *args: Any, **kwargs: Any) -> Any:
@@ -93,8 +98,12 @@ class GraphSetup:
         if len(selected_analysts) == 0:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
 
-        # Inject language instruction into LLMs for non-English reports
+        # Inject language instruction into LLMs for non-English reports.
+        # Save original deep_thinking invoke BEFORE patching so Options
+        # Strategist can use an un-injected LLM (it handles language itself).
+        _original_deep_invoke = None
         if language and language != "en":
+            _original_deep_invoke = self.deep_thinking_llm.invoke
             _inject_language(self.quick_thinking_llm, language)
             _inject_language(self.deep_thinking_llm, language)
 
@@ -151,9 +160,24 @@ class GraphSetup:
             self.deep_thinking_llm, self.risk_manager_memory
         )
 
-        # Create options strategist node
+        # Create options strategist node.
+        # Use un-injected LLM because Options Strategist handles language
+        # itself (only translates the Catalyst field) and needs English
+        # field labels for structured output parsing.
+        if _original_deep_invoke is not None:
+            class _RawInvokeProxy:
+                """Proxy that delegates to the original un-patched invoke."""
+                def __init__(self, llm, raw_invoke):
+                    self._llm = llm
+                    self.invoke = raw_invoke
+                def __getattr__(self, name):
+                    return getattr(self._llm, name)
+            options_llm = _RawInvokeProxy(self.deep_thinking_llm, _original_deep_invoke)
+        else:
+            options_llm = self.deep_thinking_llm
+
         options_strategist_node = create_options_strategist(
-            self.deep_thinking_llm, language=language
+            options_llm, language=language
         )
 
         # Create workflow

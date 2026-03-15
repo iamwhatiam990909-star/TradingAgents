@@ -44,7 +44,9 @@ Timeframe: [expected holding period]
 Risk/Reward: [ratio]
 Scaling Strategy: [entry method, e.g. single entry or tranches]
 
-FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**""",
+FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**
+
+CRITICAL: You MUST keep ALL field labels (Entry, Stop-Loss, Take-Profit Target, Position Sizing, Timeframe, Risk/Reward, Scaling Strategy, FINAL TRANSACTION PROPOSAL) and the header "---TRADE PLAN---" in English exactly as shown above. Do NOT translate these labels into any other language.""",
             },
             context,
         ]
