@@ -1,6 +1,9 @@
 # TradingAgents/graph/setup.py
 
-from typing import Dict, Any
+import logging
+from typing import Callable, Dict, Any
+
+from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph, START
 from langgraph.prebuilt import ToolNode
@@ -9,6 +12,44 @@ from tradingagents.agents import *
 from tradingagents.agents.utils.agent_states import AgentState
 
 from .conditional_logic import ConditionalLogic
+
+logger = logging.getLogger(__name__)
+
+
+def _skip_analyst_if_done(node_fn: Callable, report_field: str) -> Callable:
+    """Wrap an analyst node to skip LLM call if its report already exists."""
+    def wrapped(state):
+        existing = state.get(report_field)
+        if existing:
+            logger.info("Checkpoint skip: %s already populated", report_field)
+            return {
+                "messages": [AIMessage(content=f"[Checkpoint: {report_field} restored]")],
+                report_field: existing,
+            }
+        return node_fn(state)
+    return wrapped
+
+
+def _skip_debate_if_done(node_fn: Callable, debate_field: str) -> Callable:
+    """Wrap a debate node to skip if judge_decision already exists."""
+    def wrapped(state):
+        debate = state.get(debate_field, {})
+        if debate.get("judge_decision"):
+            logger.info("Checkpoint skip: %s debate already judged", debate_field)
+            return {}
+        return node_fn(state)
+    return wrapped
+
+
+def _skip_if_done(node_fn: Callable, field: str) -> Callable:
+    """Wrap a node to skip if its output field already exists."""
+    def wrapped(state):
+        existing = state.get(field)
+        if existing:
+            logger.info("Checkpoint skip: %s already populated", field)
+            return {}
+        return node_fn(state)
+    return wrapped
 
 _LANG_NAMES: Dict[str, str] = {
     "zh-TW": "Traditional Chinese (繁體中文)",
@@ -107,57 +148,85 @@ class GraphSetup:
             _inject_language(self.quick_thinking_llm, language)
             _inject_language(self.deep_thinking_llm, language)
 
-        # Create analyst nodes
+        # Mapping: analyst type -> report state field
+        _ANALYST_REPORT_FIELDS = {
+            "market": "market_report",
+            "social": "sentiment_report",
+            "news": "news_report",
+            "fundamentals": "fundamentals_report",
+        }
+
+        # Create analyst nodes (wrapped with checkpoint skip)
         analyst_nodes = {}
         delete_nodes = {}
         tool_nodes = {}
 
         if "market" in selected_analysts:
-            analyst_nodes["market"] = create_market_analyst(
-                self.quick_thinking_llm
+            analyst_nodes["market"] = _skip_analyst_if_done(
+                create_market_analyst(self.quick_thinking_llm),
+                _ANALYST_REPORT_FIELDS["market"],
             )
             delete_nodes["market"] = create_msg_delete()
             tool_nodes["market"] = self.tool_nodes["market"]
 
         if "social" in selected_analysts:
-            analyst_nodes["social"] = create_social_media_analyst(
-                self.quick_thinking_llm
+            analyst_nodes["social"] = _skip_analyst_if_done(
+                create_social_media_analyst(self.quick_thinking_llm),
+                _ANALYST_REPORT_FIELDS["social"],
             )
             delete_nodes["social"] = create_msg_delete()
             tool_nodes["social"] = self.tool_nodes["social"]
 
         if "news" in selected_analysts:
-            analyst_nodes["news"] = create_news_analyst(
-                self.quick_thinking_llm
+            analyst_nodes["news"] = _skip_analyst_if_done(
+                create_news_analyst(self.quick_thinking_llm),
+                _ANALYST_REPORT_FIELDS["news"],
             )
             delete_nodes["news"] = create_msg_delete()
             tool_nodes["news"] = self.tool_nodes["news"]
 
         if "fundamentals" in selected_analysts:
-            analyst_nodes["fundamentals"] = create_fundamentals_analyst(
-                self.quick_thinking_llm
+            analyst_nodes["fundamentals"] = _skip_analyst_if_done(
+                create_fundamentals_analyst(self.quick_thinking_llm),
+                _ANALYST_REPORT_FIELDS["fundamentals"],
             )
             delete_nodes["fundamentals"] = create_msg_delete()
             tool_nodes["fundamentals"] = self.tool_nodes["fundamentals"]
 
-        # Create researcher and manager nodes
-        bull_researcher_node = create_bull_researcher(
-            self.quick_thinking_llm, self.bull_memory
+        # Create researcher and manager nodes (wrapped with checkpoint skip)
+        bull_researcher_node = _skip_debate_if_done(
+            create_bull_researcher(self.quick_thinking_llm, self.bull_memory),
+            "investment_debate_state",
         )
-        bear_researcher_node = create_bear_researcher(
-            self.quick_thinking_llm, self.bear_memory
+        bear_researcher_node = _skip_debate_if_done(
+            create_bear_researcher(self.quick_thinking_llm, self.bear_memory),
+            "investment_debate_state",
         )
-        research_manager_node = create_research_manager(
-            self.deep_thinking_llm, self.invest_judge_memory
+        research_manager_node = _skip_if_done(
+            create_research_manager(self.deep_thinking_llm, self.invest_judge_memory),
+            "investment_plan",
         )
-        trader_node = create_trader(self.quick_thinking_llm, self.trader_memory)
+        trader_node = _skip_if_done(
+            create_trader(self.quick_thinking_llm, self.trader_memory),
+            "trader_investment_plan",
+        )
 
-        # Create risk analysis nodes
-        aggressive_analyst = create_aggressive_debator(self.quick_thinking_llm)
-        neutral_analyst = create_neutral_debator(self.quick_thinking_llm)
-        conservative_analyst = create_conservative_debator(self.quick_thinking_llm)
-        risk_manager_node = create_risk_manager(
-            self.deep_thinking_llm, self.risk_manager_memory
+        # Create risk analysis nodes (wrapped with checkpoint skip)
+        aggressive_analyst = _skip_debate_if_done(
+            create_aggressive_debator(self.quick_thinking_llm),
+            "risk_debate_state",
+        )
+        neutral_analyst = _skip_debate_if_done(
+            create_neutral_debator(self.quick_thinking_llm),
+            "risk_debate_state",
+        )
+        conservative_analyst = _skip_debate_if_done(
+            create_conservative_debator(self.quick_thinking_llm),
+            "risk_debate_state",
+        )
+        risk_manager_node = _skip_if_done(
+            create_risk_manager(self.deep_thinking_llm, self.risk_manager_memory),
+            "final_trade_decision",
         )
 
         # Create options strategist node.
@@ -176,8 +245,9 @@ class GraphSetup:
         else:
             options_llm = self.deep_thinking_llm
 
-        options_strategist_node = create_options_strategist(
-            options_llm, language=language
+        options_strategist_node = _skip_if_done(
+            create_options_strategist(options_llm, language=language),
+            "options_strategist_output",
         )
 
         # Create workflow

@@ -1,10 +1,13 @@
 # TradingAgents/graph/trading_graph.py
 
+import logging
 import os
 from pathlib import Path
 import json
 from datetime import date
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Callable, Dict, Any, Tuple, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from langgraph.prebuilt import ToolNode
 
@@ -184,15 +187,56 @@ class TradingAgentsGraph:
             ),
         }
 
-    def propagate(self, company_name, trade_date):
-        """Run the trading agents graph for a company on a specific date."""
+    # Fields that indicate phase completion for checkpoint detection.
+    _PHASE_FIELDS = [
+        # Phase 0: all analyst reports done
+        ("market_report", "sentiment_report", "news_report", "fundamentals_report"),
+        # Phase 1: investment debate done
+        ("investment_plan",),
+        # Phase 2: trader plan done
+        ("trader_investment_plan",),
+        # Phase 3: risk analysis done
+        ("final_trade_decision",),
+        # Phase 4: options strategist done
+        ("options_strategist_output",),
+    ]
+
+    def propagate(
+        self,
+        company_name,
+        trade_date,
+        initial_state: Dict[str, Any] = None,
+        on_checkpoint: Callable[[int, Dict[str, Any]], None] = None,
+    ):
+        """Run the trading agents graph for a company on a specific date.
+
+        Args:
+            company_name: Ticker symbol.
+            trade_date: Trading date string.
+            initial_state: Optional pre-populated state for resuming from checkpoint.
+                When provided, graph nodes that detect existing outputs will skip
+                their LLM calls, effectively resuming from the checkpoint.
+            on_checkpoint: Optional callback(phase: int, state: dict) invoked
+                when a new phase boundary is detected during streaming.
+        """
 
         self.ticker = company_name
 
-        # Initialize state
-        init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date
-        )
+        if initial_state is not None:
+            init_agent_state = initial_state
+            logger.info(
+                "Resuming from checkpoint for %s (phase fields populated: %s)",
+                company_name,
+                [f for f in ("market_report", "investment_plan",
+                             "trader_investment_plan", "final_trade_decision",
+                             "options_strategist_output")
+                 if initial_state.get(f)],
+            )
+        else:
+            init_agent_state = self.propagator.create_initial_state(
+                company_name, trade_date
+            )
+
         args = self.propagator.get_graph_args()
 
         if self.debug:
@@ -206,6 +250,21 @@ class TradingAgentsGraph:
                     trace.append(chunk)
 
             final_state = trace[-1]
+        elif on_checkpoint:
+            # Streaming mode for checkpoint capture
+            last_state = None
+            last_phase = -1
+            for state in self.graph.stream(init_agent_state, **args):
+                last_state = state
+                phase = self._detect_phase(state)
+                if phase > last_phase:
+                    last_phase = phase
+                    try:
+                        on_checkpoint(phase, state)
+                    except Exception as e:
+                        logger.warning("Checkpoint callback error (phase %d): %s", phase, e)
+
+            final_state = last_state
         else:
             # Standard mode without tracing
             final_state = self.graph.invoke(init_agent_state, **args)
@@ -218,6 +277,14 @@ class TradingAgentsGraph:
 
         # Return decision and processed signal
         return final_state, self.process_signal(final_state["final_trade_decision"])
+
+    def _detect_phase(self, state: Dict[str, Any]) -> int:
+        """Detect the highest completed phase based on populated state fields."""
+        for phase_idx in range(len(self._PHASE_FIELDS) - 1, -1, -1):
+            fields = self._PHASE_FIELDS[phase_idx]
+            if all(state.get(f) for f in fields):
+                return phase_idx
+        return -1
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""

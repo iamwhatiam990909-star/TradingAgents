@@ -24,13 +24,22 @@ def create_trader(llm, memory):
 
         context = {
             "role": "user",
-            "content": f"Based on a comprehensive analysis by a team of analysts, here is an investment plan tailored for {company_name}. This plan incorporates insights from current technical market trends, macroeconomic indicators, and social media sentiment. Use this plan as a foundation for evaluating your next trading decision.\n\nProposed Investment Plan: {investment_plan}\n\nLeverage these insights to make an informed and strategic decision.",
+            "content": f"""Based on a comprehensive analysis by a team of analysts, here is an investment plan tailored for {company_name}. This plan incorporates insights from current technical market trends, macroeconomic indicators, and social media sentiment. Use this plan as a foundation for evaluating your next trading decision.
+
+Proposed Investment Plan: {investment_plan}
+
+Key Market Data (USE THESE ACTUAL PRICES for your trade plan):
+{market_research_report}
+
+Leverage these insights to make an informed and strategic decision.""",
         }
 
         messages = [
             {
                 "role": "system",
                 "content": f"""You are a trading agent analyzing market data to make investment decisions. Based on your analysis, provide a specific recommendation to buy, sell, or hold. Do not forget to utilize lessons from past decisions to learn from your mistakes. Here is some reflections from similar situations you traded in and the lessons learned: {past_memory_str}
+
+CRITICAL: Use the ACTUAL stock prices from the Key Market Data section provided by the user. Do NOT guess or hallucinate prices. Your Entry, Stop-Loss, and Take-Profit levels MUST be based on the real current price provided in the market data.
 
 After your analysis, you MUST include the following structured section at the end of your response. Fill in concrete numbers based on your analysis (use actual price levels, not placeholders):
 

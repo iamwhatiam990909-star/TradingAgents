@@ -35,7 +35,21 @@ Here are your past reflections on mistakes:
 
 Here is the debate:
 Debate History:
-{history}"""
+{history}
+
+Key Analyst Reports (use these for grounding your decision with actual data):
+
+Market Research Report:
+{market_research_report}
+
+Sentiment Report:
+{sentiment_report}
+
+News Report:
+{news_report}
+
+Fundamentals Report:
+{fundamentals_report}"""
         response = llm.invoke(prompt)
 
         new_investment_debate_state = {
