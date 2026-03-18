@@ -126,6 +126,7 @@ class GraphSetup:
     def setup_graph(
         self, selected_analysts=["market", "social", "news", "fundamentals"],
         language: str = "en",
+        skip_options: bool = False,
     ):
         """Set up and compile the agent workflow graph.
 
@@ -229,26 +230,25 @@ class GraphSetup:
             "final_trade_decision",
         )
 
-        # Create options strategist node.
-        # Use un-injected LLM because Options Strategist handles language
-        # itself (only translates the Catalyst field) and needs English
-        # field labels for structured output parsing.
-        if _original_deep_invoke is not None:
-            class _RawInvokeProxy:
-                """Proxy that delegates to the original un-patched invoke."""
-                def __init__(self, llm, raw_invoke):
-                    self._llm = llm
-                    self.invoke = raw_invoke
-                def __getattr__(self, name):
-                    return getattr(self._llm, name)
-            options_llm = _RawInvokeProxy(self.deep_thinking_llm, _original_deep_invoke)
-        else:
-            options_llm = self.deep_thinking_llm
+        # Create options strategist node (skipped when skip_options=True
+        # to speed up pipeline; options generated on-demand via API).
+        if not skip_options:
+            if _original_deep_invoke is not None:
+                class _RawInvokeProxy:
+                    """Proxy that delegates to the original un-patched invoke."""
+                    def __init__(self, llm, raw_invoke):
+                        self._llm = llm
+                        self.invoke = raw_invoke
+                    def __getattr__(self, name):
+                        return getattr(self._llm, name)
+                options_llm = _RawInvokeProxy(self.deep_thinking_llm, _original_deep_invoke)
+            else:
+                options_llm = self.deep_thinking_llm
 
-        options_strategist_node = _skip_if_done(
-            create_options_strategist(options_llm, language=language),
-            "options_strategist_output",
-        )
+            options_strategist_node = _skip_if_done(
+                create_options_strategist(options_llm, language=language),
+                "options_strategist_output",
+            )
 
         # Create workflow
         workflow = StateGraph(AgentState)
@@ -270,7 +270,8 @@ class GraphSetup:
         workflow.add_node("Neutral Analyst", neutral_analyst)
         workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Risk Judge", risk_manager_node)
-        workflow.add_node("Options Strategist", options_strategist_node)
+        if not skip_options:
+            workflow.add_node("Options Strategist", options_strategist_node)
 
         # Define edges
         # Start with the first analyst
@@ -342,8 +343,11 @@ class GraphSetup:
             },
         )
 
-        workflow.add_edge("Risk Judge", "Options Strategist")
-        workflow.add_edge("Options Strategist", END)
+        if skip_options:
+            workflow.add_edge("Risk Judge", END)
+        else:
+            workflow.add_edge("Risk Judge", "Options Strategist")
+            workflow.add_edge("Options Strategist", END)
 
         # Compile and return
         return workflow.compile()

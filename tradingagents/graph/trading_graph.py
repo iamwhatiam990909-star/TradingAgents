@@ -52,6 +52,7 @@ class TradingAgentsGraph:
         debug=False,
         config: Dict[str, Any] = None,
         callbacks: Optional[List] = None,
+        skip_options: bool = False,
     ):
         """Initialize the trading agents graph and components.
 
@@ -132,7 +133,9 @@ class TradingAgentsGraph:
 
         # Set up the graph (pass language for locale-aware LLM output)
         language = self.config.get("language", "en")
-        self.graph = self.graph_setup.setup_graph(selected_analysts, language=language)
+        self.graph = self.graph_setup.setup_graph(
+            selected_analysts, language=language, skip_options=skip_options,
+        )
 
     def _get_provider_kwargs(self) -> Dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
