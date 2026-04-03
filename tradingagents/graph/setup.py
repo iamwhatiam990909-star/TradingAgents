@@ -1,6 +1,8 @@
 # TradingAgents/graph/setup.py
 
 import logging
+import threading
+import time
 from typing import Callable, Dict, Any
 
 from langchain_core.messages import AIMessage
@@ -15,10 +17,86 @@ from .conditional_logic import ConditionalLogic
 
 logger = logging.getLogger(__name__)
 
+# ── Retry + Request Size Logging ──────────────────────────────────────
+
+_TRANSIENT_ERROR_KEYWORDS = (
+    "disconnected", "connection", "timeout", "reset by peer",
+    "broken pipe", "eof occurred", "remoteerror", "remoteprotocolerror",
+    "server disconnected", "connection aborted", "incomplete read",
+)
+
+_MAX_RETRIES = 2
+_RETRY_BACKOFF = [5, 15]
+
+# Thread-local storage for tracking which agent is currently invoking
+_tls = threading.local()
+
+
+def set_current_agent(name: str) -> None:
+    """Set the current agent name for logging (called by agent nodes)."""
+    _tls.agent_name = name
+
+
+def _get_current_agent() -> str:
+    return getattr(_tls, "agent_name", "unknown")
+
+
+def _estimate_tokens(input_data: Any) -> int:
+    """Rough token estimate: chars / 3 for mixed CJK+English text."""
+    if isinstance(input_data, str):
+        text = input_data
+    elif isinstance(input_data, list):
+        text = " ".join(str(m) for m in input_data)
+    else:
+        text = str(input_data)
+    return len(text) // 3
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    err_str = f"{type(exc).__name__} {exc}".lower()
+    return any(kw in err_str for kw in _TRANSIENT_ERROR_KEYWORDS)
+
+
+def _inject_retry_and_logging(llm: Any, label: str) -> None:
+    """Monkey-patch llm.invoke with retry on transient errors + size logging."""
+    original_invoke = llm.invoke
+
+    def retrying_invoke(input_data: Any, *args: Any, **kwargs: Any) -> Any:
+        est_tokens = _estimate_tokens(input_data)
+        agent = _get_current_agent()
+
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                logger.info(
+                    "LLM invoke [%s/%s]: ~%d tokens (attempt %d/%d)",
+                    label, agent, est_tokens, attempt + 1, _MAX_RETRIES + 1,
+                )
+                result = original_invoke(input_data, *args, **kwargs)
+                return result
+            except Exception as exc:
+                is_transient = _is_transient_error(exc)
+                logger.error(
+                    "LLM invoke FAILED [%s/%s]: ~%d tokens | %s: %s | attempt %d/%d | transient=%s",
+                    label, agent, est_tokens,
+                    type(exc).__name__, str(exc)[:200],
+                    attempt + 1, _MAX_RETRIES + 1, is_transient,
+                )
+                if not is_transient or attempt == _MAX_RETRIES:
+                    raise
+                wait = _RETRY_BACKOFF[attempt]
+                logger.warning(
+                    "Retrying in %ds (attempt %d/%d)...",
+                    wait, attempt + 2, _MAX_RETRIES + 1,
+                )
+                time.sleep(wait)
+
+    object.__setattr__(llm, "invoke", retrying_invoke)
+
 
 def _skip_analyst_if_done(node_fn: Callable, report_field: str) -> Callable:
     """Wrap an analyst node to skip LLM call if its report already exists."""
     def wrapped(state):
+        set_current_agent(report_field)
         existing = state.get(report_field)
         if existing:
             logger.info("Checkpoint skip: %s already populated", report_field)
@@ -33,6 +111,7 @@ def _skip_analyst_if_done(node_fn: Callable, report_field: str) -> Callable:
 def _skip_debate_if_done(node_fn: Callable, debate_field: str) -> Callable:
     """Wrap a debate node to skip if judge_decision already exists."""
     def wrapped(state):
+        set_current_agent(debate_field)
         debate = state.get(debate_field, {})
         if debate.get("judge_decision"):
             logger.info("Checkpoint skip: %s debate already judged", debate_field)
@@ -44,6 +123,7 @@ def _skip_debate_if_done(node_fn: Callable, debate_field: str) -> Callable:
 def _skip_if_done(node_fn: Callable, field: str) -> Callable:
     """Wrap a node to skip if its output field already exists."""
     def wrapped(state):
+        set_current_agent(field)
         existing = state.get(field)
         if existing:
             logger.info("Checkpoint skip: %s already populated", field)
@@ -140,6 +220,10 @@ class GraphSetup:
         if len(selected_analysts) == 0:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
 
+        # Inject retry + request-size logging (before language patch).
+        _inject_retry_and_logging(self.quick_thinking_llm, "quick")
+        _inject_retry_and_logging(self.deep_thinking_llm, "deep")
+
         # Inject language instruction into LLMs for non-English reports.
         # Save original deep_thinking invoke BEFORE patching so Options
         # Strategist can use an un-injected LLM (it handles language itself).
@@ -212,17 +296,9 @@ class GraphSetup:
             "trader_investment_plan",
         )
 
-        # Create risk analysis nodes (wrapped with checkpoint skip)
-        aggressive_analyst = _skip_debate_if_done(
-            create_aggressive_debator(self.quick_thinking_llm),
-            "risk_debate_state",
-        )
-        neutral_analyst = _skip_debate_if_done(
-            create_neutral_debator(self.quick_thinking_llm),
-            "risk_debate_state",
-        )
-        conservative_analyst = _skip_debate_if_done(
-            create_conservative_debator(self.quick_thinking_llm),
+        # Create parallel risk debate node (3 analysts run concurrently)
+        parallel_risk_debate_node = _skip_debate_if_done(
+            create_parallel_risk_debate(self.quick_thinking_llm),
             "risk_debate_state",
         )
         risk_manager_node = _skip_if_done(
@@ -266,9 +342,7 @@ class GraphSetup:
         workflow.add_node("Bear Researcher", bear_researcher_node)
         workflow.add_node("Research Manager", research_manager_node)
         workflow.add_node("Trader", trader_node)
-        workflow.add_node("Aggressive Analyst", aggressive_analyst)
-        workflow.add_node("Neutral Analyst", neutral_analyst)
-        workflow.add_node("Conservative Analyst", conservative_analyst)
+        workflow.add_node("Parallel Risk Debate", parallel_risk_debate_node)
         workflow.add_node("Risk Judge", risk_manager_node)
         if not skip_options:
             workflow.add_node("Options Strategist", options_strategist_node)
@@ -317,31 +391,8 @@ class GraphSetup:
             },
         )
         workflow.add_edge("Research Manager", "Trader")
-        workflow.add_edge("Trader", "Aggressive Analyst")
-        workflow.add_conditional_edges(
-            "Aggressive Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Conservative Analyst": "Conservative Analyst",
-                "Risk Judge": "Risk Judge",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Conservative Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Neutral Analyst": "Neutral Analyst",
-                "Risk Judge": "Risk Judge",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Neutral Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Aggressive Analyst": "Aggressive Analyst",
-                "Risk Judge": "Risk Judge",
-            },
-        )
+        workflow.add_edge("Trader", "Parallel Risk Debate")
+        workflow.add_edge("Parallel Risk Debate", "Risk Judge")
 
         if skip_options:
             workflow.add_edge("Risk Judge", END)

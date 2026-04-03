@@ -30,12 +30,22 @@ Key points to focus on:
 - Positive Indicators: Use financial health, industry trends, and recent positive news as evidence.
 - Bear Counterpoints: Critically analyze the bear argument with specific data and sound reasoning, addressing concerns thoroughly and showing why the bull perspective holds stronger merit.
 - Engagement: Present your argument in a conversational style, engaging directly with the bear analyst's points and debating effectively rather than just listing data.
+- IMPORTANT WEIGHTING: Your BUY argument must be primarily grounded in Fundamentals and News (long-term thesis). Technical and Sentiment data support timing only — do NOT anchor the bull case on price momentum or short-term sentiment alone.
 
-Resources available:
-Market research report: {market_research_report}
-Social media sentiment report: {sentiment_report}
-Latest world affairs news: {news_report}
-Company fundamentals report: {fundamentals_report}
+=== PRIMARY EVIDENCE (build your long-term bull thesis from these) ===
+Company Fundamentals Report (financial health, valuation, competitive moat):
+{fundamentals_report}
+
+Latest News & Macro Report (catalysts, sector trends, upcoming events):
+{news_report}
+
+=== SECONDARY CONTEXT (use only for timing and short-term signal support) ===
+Technical / Market Report (price action, moving averages, support/resistance):
+{market_research_report}
+
+Social Sentiment Report (retail/social mood — secondary, noisy signal):
+{sentiment_report}
+
 Conversation history of the debate: {history}
 Last bear argument: {current_response}
 Reflections from similar situations and lessons learned: {past_memory_str}

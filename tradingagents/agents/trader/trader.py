@@ -41,13 +41,26 @@ Leverage these insights to make an informed and strategic decision.""",
 
 CRITICAL: Use the ACTUAL stock prices from the Key Market Data section provided by the user. Do NOT guess or hallucinate prices. Your Entry, Stop-Loss, and Take-Profit levels MUST be based on the real current price provided in the market data.
 
+PRICE LOGIC RULES (you MUST follow):
+- If recommending BUY:
+  Take-Profit MUST be ABOVE Entry (you expect price to RISE)
+  Stop-Loss MUST be BELOW Entry (cut loss if price drops below support)
+  Example: Entry $100, Stop-Loss $92 (-8%), Take-Profit $115 (+15%)
+- If recommending SELL:
+  Take-Profit MUST be BELOW Entry (you expect price to FALL)
+  Stop-Loss MUST be ABOVE Entry (cut loss if price rises above resistance)
+  Example: Entry $100, Stop-Loss $108 (+8%), Take-Profit $85 (-15%)
+- If recommending HOLD:
+  Entry = current price as reference point (not a new entry)
+  Provide upside target and downside stop as monitoring levels
+
 After your analysis, you MUST include the following structured section at the end of your response. Fill in concrete numbers based on your analysis (use actual price levels, not placeholders):
 
 ---TRADE PLAN---
 Entry: [price range or condition]
 Stop-Loss: [price level with percentage from entry]
-Take-Profit Target 1: [price level with percentage gain]
-Take-Profit Target 2: [price level with percentage gain]
+Take-Profit Target 1: [price level with percentage from entry]
+Take-Profit Target 2: [price level with percentage from entry]
 Position Sizing: [recommended allocation]
 Timeframe: [expected holding period]
 Risk/Reward: [ratio]
