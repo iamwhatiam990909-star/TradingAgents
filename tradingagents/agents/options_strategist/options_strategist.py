@@ -67,8 +67,12 @@ RULES — you MUST follow every rule below:
    - Output "bearish" if short-term technical indicators show downward momentum (e.g. RSI falling below 50, price below key moving averages, bearish chart patterns, negative social sentiment trend)
    - Output "neutral" if short-term technical indicators show sideways/range-bound price action (e.g. price oscillating between support and resistance, RSI near 50, no clear trend, Bollinger Bands flat or contracting, low ADX)
    - Output "no_trade" ONLY if:
-     * No identifiable catalyst within 6 weeks
-     * IV is extremely elevated AND the catalyst is already priced in
+     * No identifiable catalyst within 6 weeks AND no clear range to sell premium against
+     * Liquidity is too thin to enter/exit options safely (wide bid-ask spread, very low open interest)
+
+     Note: high IV with priced-in catalyst is NOT by itself a "no_trade" signal —
+     it is the textbook setup for "neutral + iron_condor" (sell premium to capture
+     post-event IV crush). Default to neutral + iron_condor in that scenario, not no_trade.
 
 2. STRATEGY SELECTION MATRIX:
    Use this decision table based on direction and IV environment:
