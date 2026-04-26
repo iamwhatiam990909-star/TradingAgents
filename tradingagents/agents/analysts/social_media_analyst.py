@@ -3,6 +3,7 @@ import time
 import json
 from tradingagents.agents.utils.agent_utils import get_news
 from tradingagents.dataflows.config import get_config
+from tradingagents.agents.analysts._tool_fallback import fallback_social
 
 
 def create_social_media_analyst(llm):
@@ -49,7 +50,10 @@ def create_social_media_analyst(llm):
         report = ""
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            if not result.content or len(result.content.strip()) < 200:
+                report = fallback_social(llm, ticker, current_date, system_message)
+            else:
+                report = result.content
 
         return {
             "messages": [result],

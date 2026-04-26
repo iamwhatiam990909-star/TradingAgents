@@ -3,6 +3,7 @@ import time
 import json
 from tradingagents.agents.utils.agent_utils import get_fundamentals, get_balance_sheet, get_cashflow, get_income_statement, get_insider_transactions
 from tradingagents.dataflows.config import get_config
+from tradingagents.agents.analysts._tool_fallback import fallback_fundamentals
 
 
 def create_fundamentals_analyst(llm):
@@ -53,7 +54,10 @@ def create_fundamentals_analyst(llm):
         report = ""
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            if not result.content or len(result.content.strip()) < 200:
+                report = fallback_fundamentals(llm, ticker, current_date, system_message)
+            else:
+                report = result.content
 
         return {
             "messages": [result],

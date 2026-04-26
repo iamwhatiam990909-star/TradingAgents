@@ -57,16 +57,23 @@ PRICE LOGIC RULES (you MUST follow):
 After your analysis, you MUST include the following structured section at the end of your response. Fill in concrete numbers based on your analysis (use actual price levels, not placeholders):
 
 ---TRADE PLAN---
-Entry: [price range or condition]
-Stop-Loss: [price level with percentage from entry]
-Take-Profit Target 1: [price level with percentage from entry]
-Take-Profit Target 2: [price level with percentage from entry]
-Position Sizing: [recommended allocation]
-Timeframe: [expected holding period]
-Risk/Reward: [ratio]
+Entry: [price or short price range ONLY, e.g. "$303.69" or "$300-$310"]
+Stop-Loss: [price level with percentage from entry, e.g. "$270.00 (-11.10%)"]
+Take-Profit Target 1: [price level with percentage from entry, e.g. "$400.00 (+31.74%)"]
+Take-Profit Target 2: [price level with percentage from entry, e.g. "$450.00 (+48.19%)"]
+Position Sizing: [recommended allocation, e.g. "Medium" or "10-15% of portfolio"]
+Timeframe: [expected holding period, e.g. "2-4 weeks"]
+Risk/Reward: [ratio ONLY, e.g. "2.86" or "2.86 / 4.34"]
 Scaling Strategy: [entry method, e.g. single entry or tranches]
 
 FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**
+
+FORMAT RULES (MUST follow):
+- Each field value MUST be SHORT and CONCISE — numbers/prices only, no sentences or paragraphs.
+- Entry: ONLY a dollar price or price range. Do NOT write explanations. Wrong: "建議在當前市場價格附近入場..." Right: "$303.69" or "$300-$310 (near 10-day EMA)"
+- Stop-Loss / Take-Profit: price + percentage in parentheses. One line max.
+- Risk/Reward: ratio number(s) only. Wrong: "The risk reward ratio is approximately..." Right: "2.86 / 4.34"
+- You may add a SHORT parenthetical note (under 30 chars) after the number, e.g. "$400.00 (+31.74%) (Needham PT)"
 
 CRITICAL: You MUST keep ALL field labels (Entry, Stop-Loss, Take-Profit Target, Position Sizing, Timeframe, Risk/Reward, Scaling Strategy, FINAL TRANSACTION PROPOSAL) and the header "---TRADE PLAN---" in English exactly as shown above. Do NOT translate these labels into any other language.""",
             },

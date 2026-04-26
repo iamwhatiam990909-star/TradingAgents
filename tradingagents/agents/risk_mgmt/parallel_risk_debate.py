@@ -1,5 +1,4 @@
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .aggressive_debator import create_aggressive_debator
 from .conservative_debator import create_conservative_debator
@@ -29,18 +28,12 @@ def create_parallel_risk_debate(llm):
 
         results: dict[str, dict] = {}
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {
-                executor.submit(_run_debator, fn, state, f"risk_{role}"): role
-                for role, fn in role_fns.items()
-            }
-            for future in as_completed(futures):
-                role = futures[future]
-                try:
-                    results[role] = future.result()
-                except Exception:
-                    logger.exception("Risk debator '%s' failed", role)
-                    raise
+        for role, fn in role_fns.items():
+            try:
+                results[role] = _run_debator(fn, state, f"risk_{role}")
+            except Exception:
+                logger.exception("Risk debator '%s' failed", role)
+                raise
 
         merged: dict[str, str | int] = {
             "history": "",

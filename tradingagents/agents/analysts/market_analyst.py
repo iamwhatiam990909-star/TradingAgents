@@ -3,6 +3,7 @@ import time
 import json
 from tradingagents.agents.utils.agent_utils import get_stock_data, get_indicators
 from tradingagents.dataflows.config import get_config
+from tradingagents.agents.analysts._tool_fallback import fallback_market
 
 
 def create_market_analyst(llm):
@@ -75,7 +76,10 @@ Volume-Based Indicators:
         report = ""
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            if not result.content or len(result.content.strip()) < 200:
+                report = fallback_market(llm, ticker, current_date, system_message)
+            else:
+                report = result.content
 
         return {
             "messages": [result],

@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import random
 import time
 from typing import Any, Optional
 
@@ -10,29 +12,62 @@ from .validators import validate_model
 logger = logging.getLogger(__name__)
 
 
+# Optional integration with TradeGPT's process-wide throttle.
+# Wrapped in try/except so this submodule remains usable standalone.
+try:
+    from app.pipeline.llm_throttle import acquire as _throttle_acquire
+except Exception:  # pragma: no cover
+    def _throttle_acquire(label: str = "") -> None:
+        return None
+
+
+# Tunables overridable via TradeGPT settings; fall back to safe defaults
+# when imported standalone.
+try:
+    from app.config import settings as _app_settings
+    _RETRY_MAX_ATTEMPTS = int(_app_settings.LLM_RETRY_MAX_ATTEMPTS)
+    _RETRY_BASE_WAIT = int(_app_settings.LLM_RETRY_BASE_WAIT)
+    _RETRY_MAX_WAIT = int(_app_settings.LLM_RETRY_MAX_WAIT)
+except Exception:  # pragma: no cover
+    _RETRY_MAX_ATTEMPTS = 5
+    _RETRY_BASE_WAIT = 60
+    _RETRY_MAX_WAIT = 240
+
+
+_RATE_LIMIT_KEYWORDS = (
+    "429", "resource_exhausted", "resourceexhausted",
+    "quota", "rate_limit", "rate limit", "too many requests",
+)
+
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    err_type = type(e).__name__.lower()
+    err_msg = str(e).lower()
+    return any(k in err_type or k in err_msg for k in _RATE_LIMIT_KEYWORDS)
+
+
+def _backoff_seconds(attempt: int) -> float:
+    """Exponential backoff with jitter, capped at _RETRY_MAX_WAIT."""
+    raw = _RETRY_BASE_WAIT * (2 ** attempt)
+    jitter = random.uniform(0.0, 5.0)
+    return min(raw + jitter, _RETRY_MAX_WAIT)
+
+
 class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
-    """ChatGoogleGenerativeAI with normalized content output.
+    """ChatGoogleGenerativeAI with normalized content + 429 retry on all paths.
 
     Gemini 3 models return content as list: [{'type': 'text', 'text': '...'}]
     This normalizes to string for consistent downstream handling.
-    Also retries on rate-limit (429) errors with a 60-second wait.
+
+    All call paths (sync invoke / async ainvoke / sync stream / async
+    astream) acquire a throttle token first, then retry transient 429 /
+    RESOURCE_EXHAUSTED errors with exponential backoff. Retries are
+    bounded by ``LLM_RETRY_MAX_ATTEMPTS``; permanent quota / billing
+    failures still surface to the caller after the cap.
     """
 
-    _RATE_LIMIT_RETRY_MAX: int = 3
-    _RATE_LIMIT_WAIT_SECONDS: int = 60
-
-    @staticmethod
-    def _is_rate_limit_error(e: Exception) -> bool:
-        err_type = type(e).__name__.lower()
-        err_msg = str(e).lower()
-        keywords = (
-            "429", "resource_exhausted", "resourceexhausted",
-            "quota", "rate_limit", "rate limit", "too many requests",
-        )
-        return any(k in err_type or k in err_msg for k in keywords)
-
     def _normalize_content(self, response):
-        content = response.content
+        content = getattr(response, "content", None)
         if isinstance(content, list):
             texts = [
                 item.get("text", "") if isinstance(item, dict) and item.get("type") == "text"
@@ -42,18 +77,59 @@ class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
             response.content = "\n".join(t for t in texts if t)
         return response
 
-    def invoke(self, input, config=None, **kwargs):
-        for attempt in range(self._RATE_LIMIT_RETRY_MAX + 1):
+    def _retry_sync(self, fn, *args, **kwargs):
+        for attempt in range(_RETRY_MAX_ATTEMPTS + 1):
+            _throttle_acquire(label="gemini")
             try:
-                return self._normalize_content(super().invoke(input, config, **kwargs))
+                return fn(*args, **kwargs)
             except Exception as e:
-                if not self._is_rate_limit_error(e) or attempt == self._RATE_LIMIT_RETRY_MAX:
+                if not _is_rate_limit_error(e) or attempt == _RETRY_MAX_ATTEMPTS:
                     raise
+                wait = _backoff_seconds(attempt)
                 logger.warning(
-                    "Gemini rate limit hit (attempt %d/%d). Waiting %ds before retry...",
-                    attempt + 1, self._RATE_LIMIT_RETRY_MAX, self._RATE_LIMIT_WAIT_SECONDS,
+                    "Gemini 429 (attempt %d/%d). Backing off %.1fs.",
+                    attempt + 1, _RETRY_MAX_ATTEMPTS, wait,
                 )
-                time.sleep(self._RATE_LIMIT_WAIT_SECONDS)
+                time.sleep(wait)
+
+    async def _retry_async(self, fn, *args, **kwargs):
+        for attempt in range(_RETRY_MAX_ATTEMPTS + 1):
+            # Token bucket acquire blocks the event loop briefly; offload.
+            await asyncio.to_thread(_throttle_acquire, "gemini")
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as e:
+                if not _is_rate_limit_error(e) or attempt == _RETRY_MAX_ATTEMPTS:
+                    raise
+                wait = _backoff_seconds(attempt)
+                logger.warning(
+                    "Gemini 429 async (attempt %d/%d). Backing off %.1fs.",
+                    attempt + 1, _RETRY_MAX_ATTEMPTS, wait,
+                )
+                await asyncio.sleep(wait)
+
+    def invoke(self, input, config=None, **kwargs):
+        return self._normalize_content(
+            self._retry_sync(super().invoke, input, config, **kwargs),
+        )
+
+    async def ainvoke(self, input, config=None, **kwargs):
+        return self._normalize_content(
+            await self._retry_async(super().ainvoke, input, config, **kwargs),
+        )
+
+    def stream(self, input, config=None, **kwargs):
+        # Streaming returns a generator. Acquire + retry the *initial*
+        # connection; mid-stream errors will still propagate, but the
+        # 429 always fires on the first chunk request.
+        gen = self._retry_sync(super().stream, input, config, **kwargs)
+        for chunk in gen:
+            yield chunk
+
+    async def astream(self, input, config=None, **kwargs):
+        gen = await self._retry_async(super().astream, input, config, **kwargs)
+        async for chunk in gen:
+            yield chunk
 
 
 class GoogleClient(BaseLLMClient):

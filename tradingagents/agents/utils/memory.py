@@ -97,6 +97,18 @@ class FinancialSituationMemory:
         self.recommendations = []
         self.bm25 = None
 
+    def load_from_records(self, records: List[dict]):
+        """Load historical memories from DB records.
+
+        Args:
+            records: List of dicts with 'situation' and 'recommendation' keys.
+        """
+        for rec in records:
+            self.documents.append(rec["situation"])
+            self.recommendations.append(rec["recommendation"])
+        if self.documents:
+            self._rebuild_index()
+
 
 if __name__ == "__main__":
     # Example usage

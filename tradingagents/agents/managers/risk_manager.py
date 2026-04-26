@@ -30,6 +30,8 @@ Guidelines for Decision-Making:
 3. **Refine the Trader's Plan**: Start with the trader's original plan, **{trader_plan}**, and adjust it based on the analysts' insights.
 4. **Learn from Past Mistakes**: Use lessons from **{past_memory_str}** to address prior misjudgments and improve the decision you are making now to make sure you don't make a wrong BUY/SELL/HOLD call that loses money.
 
+5. **HOLD = No Action**: If your recommendation is Hold, do NOT suggest short selling, building short positions, or any directional trade. Hold means the investor should maintain their current position (or stay out). Do not use words like "short", "做空", "空頭", "沽空", "放空" in a Hold recommendation.
+
 Deliverables:
 - A clear and actionable recommendation: Buy, Sell, or Hold.
 - Detailed reasoning anchored in the debate and past reflections.
