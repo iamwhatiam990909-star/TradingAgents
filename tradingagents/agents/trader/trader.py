@@ -61,12 +61,25 @@ Entry: [price or short price range ONLY, e.g. "$303.69" or "$300-$310"]
 Stop-Loss: [price level with percentage from entry, e.g. "$270.00 (-11.10%)"]
 Take-Profit Target 1: [price level with percentage from entry, e.g. "$400.00 (+31.74%)"]
 Take-Profit Target 2: [price level with percentage from entry, e.g. "$450.00 (+48.19%)"]
-Position Sizing: [recommended allocation, e.g. "Medium" or "10-15% of portfolio"]
+Position Sizing: [absolute % of portfolio ONLY — single number or range, e.g. "15%" or "10-15%". DO NOT use words like Small/Medium/Large/中等. Choose based on the SIZING RUBRIC below.]
 Timeframe: [expected holding period, e.g. "2-4 weeks"]
 Risk/Reward: [ratio ONLY, e.g. "2.86" or "2.86 / 4.34"]
 Scaling Strategy: [entry method, e.g. single entry or tranches]
 
 FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**
+
+POSITION SIZING RUBRIC (pick one tier and output the numeric range or a number inside it):
+- High Conviction (15-25%): multiple aligned signals across technicals/fundamentals/catalyst, clear stop, catalyst confirmed
+- Medium Conviction (8-15%): primary thesis clear with 1-2 noise items, or catalyst timing uncertain
+- Speculative (3-8%): good risk/reward but lower win-rate, event-driven single-side bet
+- Pilot / Scout (1-3%): test position, awaiting confirmation, or extremely high volatility
+
+Position Sizing output format examples (allowed):
+  Position Sizing: 15% (medium conviction)
+  Position Sizing: 10-15%
+  Position Sizing: 5% (speculative, earnings play)
+
+Position Sizing values that are NEVER acceptable: "Medium", "Small", "Large", "中等倉位", "中等", "中型", or any word-only label without a percentage number.
 
 FORMAT RULES (MUST follow):
 - Each field value MUST be SHORT and CONCISE — numbers/prices only, no sentences or paragraphs.
