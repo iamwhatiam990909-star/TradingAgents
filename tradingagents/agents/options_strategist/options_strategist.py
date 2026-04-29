@@ -102,13 +102,44 @@ RULES — you MUST follow every rule below:
    - If no_trade, output "—"
 
 4. EXPIRY RULES:
-   - Express as a week range (e.g., "2-3 weeks")
-   - Directional: 2-4 weeks (1-2 weeks after catalyst if clear)
-   - Iron condor: 3-5 weeks (optimal theta decay)
-   - Calendar spread: sell near-month (2-3 weeks), buy far-month (5-6 weeks)
-   - Never suggest 0DTE or 1DTE
-   - Never exceed 6 weeks for the short leg
-   - If no_trade, output "—"
+
+   Output format (alignment tag REQUIRED):
+   - "X weeks (monthly)"                          — default for all strategies
+   - "X-Y weeks (weekly, <catalyst>)"             — catalyst-driven only
+   - "X weeks (monthly), Y weeks (monthly)"       — calendar spread two legs
+   - "—"                                          — if no_trade
+
+   A) BASE RANGES (before IV adjustment):
+      - Directional (buy_call/put, debit spreads): 2-4 weeks
+      - Iron condor: 3-5 weeks
+      - Calendar spread: sell 2-3 weeks / buy 5-6 weeks
+
+   B) MONTHLY vs WEEKLY ALIGNMENT:
+      - DEFAULT: monthly expiry (3rd Friday of the month) — best liquidity, tightest spreads
+      - REQUIRED monthly: iron_condor, calendar_spread (both legs)
+      - WEEKLY allowed ONLY when ALL of these hold:
+        * Strategy is directional debit (buy_call/put or debit spread), AND
+        * A specific catalyst (earnings/FDA/Fed/product launch) falls before the next monthly expiry, AND
+        * Catalyst date falls within the chosen week range
+      - NEVER use weekly for iron_condor or calendar_spread
+
+   C) IV-BASED EXPIRY ADJUSTMENT (apply within the base range):
+      - ELEVATED IV (ATR expanding, BB wide, recent earnings/event):
+        * Premium SELLERS (iron_condor) → pick the SHORTER end of the range (e.g. 3 weeks, not 5).
+          Reason: theta decay accelerates near expiry; capture IV crush faster.
+        * Premium BUYERS (buy_call/put, debit spreads) → pick the LONGER end of the range (e.g. 4 weeks, not 2).
+          Reason: give the thesis time to play out before vega/theta erodes value.
+      - LOW/NORMAL IV (ATR contracting, BB narrow):
+        * Premium BUYERS → pick the SHORTER end of the range (e.g. 2 weeks, not 4).
+          Reason: premium is cheap; maximize leverage with shorter-dated contracts.
+        * Premium SELLERS → pick the LONGER end of the range (e.g. 5 weeks, not 3).
+          Reason: IV is low, more time = more premium collected.
+      - Calendar spread legs: do NOT apply IV adjustment (structure is already vega/theta hedged).
+
+   D) HARD LIMITS:
+      - Never suggest 0DTE or 1DTE
+      - Never exceed 6 weeks for the short leg
+      - If no_trade, output "—"
 
 5. CATALYST:
    - One sentence describing the primary catalyst driving the trade
@@ -124,7 +155,7 @@ OUTPUT FORMAT — output EXACTLY this structure, nothing else:
 Direction: [bullish / bearish / neutral / no_trade]
 Strategy: [buy_call / buy_put / bull_call_spread / bear_put_spread / iron_condor / calendar_spread / (empty if no_trade)]
 Strike: [X%-Y% OTM / —]
-Expiry: [X-Y weeks / —]
+Expiry: [X weeks (monthly) / X-Y weeks (weekly, catalyst) / X weeks (monthly), Y weeks (monthly) / —]
 Catalyst: [one sentence]
 Max Risk: 全部權利金
 
