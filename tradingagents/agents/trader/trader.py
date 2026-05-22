@@ -59,8 +59,7 @@ After your analysis, you MUST include the following structured section at the en
 ---TRADE PLAN---
 Entry: [price or short price range ONLY, e.g. "$303.69" or "$300-$310"]
 Stop-Loss: [price level with percentage from entry, e.g. "$270.00 (-11.10%)"]
-Take-Profit Target 1: [price level with percentage from entry, e.g. "$400.00 (+31.74%)"]
-Take-Profit Target 2: [price level with percentage from entry, e.g. "$450.00 (+48.19%)"]
+Take-Profit Target: [ONE price level + percentage from entry + REQUIRED short basis for this level in a second parenthesis, e.g. "$400.00 (+31.74%) (key resistance)" or "$85.00 (-15.0%) (200-day SMA support)". The basis is mandatory — it must name the technical/fundamental level the target sits on, not just restate the number.]
 Position Sizing: [absolute % of portfolio ONLY — single number or range, e.g. "15%" or "10-15%". DO NOT use words like Small/Medium/Large/中等. Choose based on the SIZING RUBRIC below.]
 Timeframe: [expected holding period, e.g. "2-4 weeks"]
 Risk/Reward: [ratio ONLY, e.g. "2.86" or "2.86 / 4.34"]
