@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 try:
     from app.pipeline.llm_throttle import acquire as _throttle_acquire
 except Exception:  # pragma: no cover
-    def _throttle_acquire(label: str = "") -> None:
+    def _throttle_acquire(label: str = "", tokens: int = 1) -> None:
         return None
 
 
@@ -53,6 +53,14 @@ def _backoff_seconds(attempt: int) -> float:
     return min(raw + jitter, _RETRY_MAX_WAIT)
 
 
+def _estimate_tokens(input_obj: Any) -> int:
+    """Rough input-token estimate (~4 chars/token; conservative for zh)."""
+    try:
+        return max(1, len(str(input_obj)) // 4)
+    except Exception:
+        return 1
+
+
 class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     """ChatGoogleGenerativeAI with normalized content + 429 retry on all paths.
 
@@ -78,8 +86,9 @@ class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
         return response
 
     def _retry_sync(self, fn, *args, **kwargs):
+        est = _estimate_tokens(args[0]) if args else 1
         for attempt in range(_RETRY_MAX_ATTEMPTS + 1):
-            _throttle_acquire(label="gemini")
+            _throttle_acquire(label="gemini", tokens=est)
             try:
                 return fn(*args, **kwargs)
             except Exception as e:
@@ -93,9 +102,10 @@ class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
                 time.sleep(wait)
 
     async def _retry_async(self, fn, *args, **kwargs):
+        est = _estimate_tokens(args[0]) if args else 1
         for attempt in range(_RETRY_MAX_ATTEMPTS + 1):
             # Token bucket acquire blocks the event loop briefly; offload.
-            await asyncio.to_thread(_throttle_acquire, "gemini")
+            await asyncio.to_thread(_throttle_acquire, "gemini", est)
             try:
                 return await fn(*args, **kwargs)
             except Exception as e:
