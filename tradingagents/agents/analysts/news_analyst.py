@@ -4,6 +4,7 @@ import json
 from tradingagents.agents.utils.agent_utils import get_news, get_global_news
 from tradingagents.dataflows.config import get_config
 from tradingagents.agents.analysts._tool_fallback import fallback_news
+from tradingagents.agents.analysts._report_cleanup import clean_report_whitespace
 
 
 def create_news_analyst(llm):
@@ -53,6 +54,8 @@ def create_news_analyst(llm):
                 report = fallback_news(llm, ticker, current_date, system_message)
             else:
                 report = result.content
+
+        report = clean_report_whitespace(report)
 
         return {
             "messages": [result],

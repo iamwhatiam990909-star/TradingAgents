@@ -4,6 +4,7 @@ import json
 from tradingagents.agents.utils.agent_utils import get_fundamentals, get_balance_sheet, get_cashflow, get_income_statement, get_insider_transactions
 from tradingagents.dataflows.config import get_config
 from tradingagents.agents.analysts._tool_fallback import fallback_fundamentals
+from tradingagents.agents.analysts._report_cleanup import clean_report_whitespace
 
 
 def create_fundamentals_analyst(llm):
@@ -58,6 +59,8 @@ def create_fundamentals_analyst(llm):
                 report = fallback_fundamentals(llm, ticker, current_date, system_message)
             else:
                 report = result.content
+
+        report = clean_report_whitespace(report)
 
         return {
             "messages": [result],
