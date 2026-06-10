@@ -1,6 +1,70 @@
 import functools
 import time
 import json
+import re
+
+
+_FINAL_PROPOSAL_RE = re.compile(
+    r"FINAL\s+TRANSACTION\s+PROPOSAL\s*[:：]?\s*\**\s*(?:STRONG[\s_]+)?(BUY|SELL|HOLD)",
+    re.IGNORECASE,
+)
+
+
+def _field_first_number(block, pattern):
+    """First numeric value on the line captured by ``pattern`` (group 1)."""
+    m = re.search(pattern, block, re.IGNORECASE)
+    if not m:
+        return None
+    n = re.search(r"\$?\s*([\d,]+(?:\.\d+)?)", m.group(1))
+    if not n:
+        return None
+    try:
+        return float(n.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def parse_trade_plan(content):
+    """Best-effort parse of the ---TRADE PLAN--- block: direction + levels.
+
+    Pure function (stdlib only) so it can be unit-tested without LLM deps.
+    Missing pieces come back as None — callers must treat that as "cannot
+    judge", never as "consistent".
+    """
+    if not isinstance(content, str):
+        content = str(content) if content else ""
+    m = re.search(r"-{2,}\s*TRADE\s*PLAN\s*-{2,}", content, re.IGNORECASE)
+    block = content[m.end():] if m else content
+    pm = _FINAL_PROPOSAL_RE.search(content)
+    return {
+        "proposal": pm.group(1).upper() if pm else None,
+        "entry": _field_first_number(block, r"entry[^:：\n]*[:：]([^\n]*)"),
+        "stop": _field_first_number(block, r"stop.?loss[^:：\n]*[:：]([^\n]*)"),
+        "take_profit": _field_first_number(block, r"take.?profit[^:：\n]*[:：]([^\n]*)"),
+    }
+
+
+def trade_plan_issue(plan):
+    """Name the internal contradiction in a parsed plan, or None if coherent.
+
+    BUY must take profit ABOVE entry with the stop BELOW; SELL is the mirror.
+    HOLD is exempt: its levels are monitoring bounds, not a directional trade.
+    """
+    p, e = plan.get("proposal"), plan.get("entry")
+    t, s = plan.get("take_profit"), plan.get("stop")
+    if p not in ("BUY", "SELL") or e is None:
+        return None
+    if p == "SELL":
+        if t is not None and t > e:
+            return "you recommended SELL but Take-Profit $%g is ABOVE Entry $%g" % (t, e)
+        if s is not None and s < e:
+            return "you recommended SELL but Stop-Loss $%g is BELOW Entry $%g" % (s, e)
+    else:
+        if t is not None and t < e:
+            return "you recommended BUY but Take-Profit $%g is BELOW Entry $%g" % (t, e)
+        if s is not None and s > e:
+            return "you recommended BUY but Stop-Loss $%g is ABOVE Entry $%g" % (s, e)
+    return None
 
 
 def create_trader(llm, memory):
@@ -53,6 +117,7 @@ PRICE LOGIC RULES (you MUST follow):
 - If recommending HOLD:
   Entry = current price as reference point (not a new entry)
   Provide upside target and downside stop as monitoring levels
+- BEFORE outputting the TRADE PLAN, SELF-CHECK: for BUY verify Stop-Loss < Entry < Take-Profit; for SELL verify Take-Profit < Entry < Stop-Loss. If a level violates the rule for your direction, FIX the level — do NOT keep mismatched levels and do NOT flip the direction to excuse them.
 
 After your analysis, you MUST include the following structured section at the end of your response. Fill in concrete numbers based on your analysis (use actual price levels, not placeholders):
 
@@ -93,6 +158,35 @@ CRITICAL: You MUST keep ALL field labels (Entry, Stop-Loss, Take-Profit Target, 
         ]
 
         result = llm.invoke(messages)
+
+        # Deterministic self-consistency gate: a directional plan whose levels
+        # form the opposite trade (e.g. SELL with take-profit above entry) gets
+        # ONE corrective re-invoke. Keep the direction, fix the levels. If the
+        # retry is unparseable, keep the original — the app layer flags the
+        # residual mismatch instead of us looping.
+        issue = trade_plan_issue(parse_trade_plan(result.content))
+        if issue:
+            correction = {
+                "role": "user",
+                "content": (
+                    f"Your TRADE PLAN is internally inconsistent: {issue}. "
+                    "A SELL profits when price FALLS: Take-Profit MUST be BELOW "
+                    "Entry and Stop-Loss MUST be ABOVE Entry. A BUY profits when "
+                    "price RISES: Take-Profit MUST be ABOVE Entry and Stop-Loss "
+                    "MUST be BELOW Entry. Re-output your ENTIRE response (full "
+                    "analysis, the complete ---TRADE PLAN--- section and FINAL "
+                    "TRANSACTION PROPOSAL) with self-consistent price levels. "
+                    "Keep your recommendation direction unless the market data "
+                    "truly supports flipping it."
+                ),
+            }
+            retry = llm.invoke(
+                messages
+                + [{"role": "assistant", "content": result.content}, correction]
+            )
+            retry_plan = parse_trade_plan(retry.content)
+            if retry_plan["proposal"] and retry_plan["entry"] is not None:
+                result = retry
 
         return {
             "messages": [result],
